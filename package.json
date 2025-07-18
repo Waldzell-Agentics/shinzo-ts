@@ -1,0 +1,71 @@
+{
+  "name": "shinzo",
+  "version": "0.0.0",
+  "description": "Composable MCP analytics stack",
+  "type": "commonjs",
+  "private": true,
+  "engines": {
+    "node": ">=22.16",
+    "pnpm": ">=10.2.1"
+  },
+  "packageManager": "pnpm@10.12.1",
+  "pnpm": {
+    "peerDependencyRules": {
+      "allowedVersions": {
+        "*": "*"
+      }
+    }
+  },
+  "scripts": {
+    "build": "pnpm -r run build",
+    "dev": "pnpm -r --parallel run dev",
+    "test": "pnpm -r run test",
+    "test:watch": "pnpm -r --parallel run test:watch",
+    "test:coverage": "pnpm -r run test:coverage",
+    "test:unit": "pnpm -r run test:unit",
+    "test:integration": "pnpm -r run test:integration",
+    "test:ci": "pnpm -r run test:ci",
+    "lint": "pnpm -r run lint",
+    "type-check": "pnpm -r run type-check",
+    "clean": "pnpm -r run clean",
+    "prepare": "pnpm run build",
+    "prepack": "pnpm run clean && pnpm run build",
+    "publish": "pnpm -r publish --access public"
+  },
+  "keywords": [
+    "mcp",
+    "analytics",
+    "opentelemetry",
+    "observability",
+    "telemetry",
+    "tracing",
+    "monitoring",
+    "instrumentation",
+    "composable",
+    "stack",
+    "agent"
+  ],
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/shinzo-labs/shinzo-ts.git"
+  },
+  "homepage": "https://github.com/shinzo-labs/shinzo-ts",
+  "bugs": {
+    "url": "https://github.com/shinzo-labs/shinzo-ts/issues"
+  },
+  "workspaces": [
+    "packages/*"
+  ],
+  "devDependencies": {
+    "@changesets/cli": "^2.27.9",
+    "@types/jest": "^29.0.0",
+    "@types/node": "^20.0.0",
+    "@typescript-eslint/eslint-plugin": "^6.0.0",
+    "@typescript-eslint/parser": "^6.0.0",
+    "eslint": "^8.0.0",
+    "jest": "^29.0.0",
+    "ts-jest": "^29.0.0",
+    "ts-node": "^10.9.0",
+    "typescript": "^5.0.0"
+  }
+}

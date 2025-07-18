@@ -1,0 +1,128 @@
+name: On PR for Feature Branch
+
+on:
+  pull_request:
+    branches-ignore:
+      - changeset-release/main
+
+env:
+  UPSTREAM_BRANCH: origin/${{ github.base_ref }}
+
+concurrency:
+  group: pr-${{ github.event.pull_request.number }}-checks
+  cancel-in-progress: true
+
+jobs:
+  check-changeset:
+    name: Check for changeset
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Fetch base branch
+        run: git fetch origin main:refs/remotes/origin/main
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Install pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 10.12.1
+      - name: Get pnpm store directory
+        shell: bash
+        run: |
+          echo "STORE_PATH=$(pnpm store path --silent)" >> $GITHUB_ENV
+      - name: Setup pnpm cache
+        uses: actions/cache@v4
+        with:
+          path: ${{ env.STORE_PATH }}
+          key: ${{ runner.os }}-pnpm-store-${{ hashFiles('**/pnpm-lock.yaml') }}
+          restore-keys: |
+            ${{ runner.os }}-pnpm-store-
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+      - name: Check for changeset
+        run: npx @changesets/cli status --since=origin/main
+      - name: Validate package versions
+        run: |
+          # Check if any package versions have been manually bumped without changesets
+          # Allow changes to "0.0.0" (initial setup) and from changeset release PRs
+          if [[ "${{ github.head_ref }}" == changeset-release/* ]]; then
+            echo "Skipping version validation for changeset release PR"
+            exit 0
+          fi
+          
+          git diff --name-only origin/main...HEAD | grep 'package\.json$' | while read file; do
+            if git diff origin/main...HEAD "$file" | grep -q '"version"'; then
+              # Get the version changes
+              version_changes=$(git diff origin/main...HEAD "$file" | grep '"version"')
+              
+              # Allow changes to/from "0.0.0" (initial setup only)
+              if echo "$version_changes" | grep -q '"0.0.0"'; then
+                echo "✅ Allowing version change to/from 0.0.0 in $file (initial setup)"
+                continue
+              fi
+              
+              # Root package.json should remain at 0.0.0 (private coordination package)
+              if [[ "$file" == "package.json" ]]; then
+                echo "⚠️  Root package.json version should remain at 0.0.0"
+                echo "Only workspace packages should be versioned via changesets"
+                echo "Changes: $version_changes"
+                exit 1
+              fi
+              
+              echo "⚠️  Version change detected in $file without changeset"
+              echo "Changes: $version_changes"
+              echo "Please use 'pnpm changeset' to manage version bumps"
+              exit 1
+            fi
+          done
+
+  validate-build:
+    name: Validate build and tests
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Install pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 10.12.1
+      - name: Get pnpm store directory
+        shell: bash
+        run: |
+          echo "STORE_PATH=$(pnpm store path --silent)" >> $GITHUB_ENV
+      - name: Setup pnpm cache
+        uses: actions/cache@v4
+        with:
+          path: ${{ env.STORE_PATH }}
+          key: ${{ runner.os }}-pnpm-store-${{ hashFiles('**/pnpm-lock.yaml') }}
+          restore-keys: |
+            ${{ runner.os }}-pnpm-store-
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+      - name: Run linting
+        run: pnpm run lint
+      - name: Run type checking
+        run: pnpm run type-check
+      - name: Run tests
+        run: pnpm run test:ci
+      - name: Build packages
+        run: pnpm run build
+      - name: Upload test results
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: test-results
+          path: |
+            **/coverage/
+            **/test-results.xml
+            **/junit.xml
+          retention-days: 30
