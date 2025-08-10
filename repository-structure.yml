@@ -1,0 +1,27 @@
+# This file describes the structure of the Shinzo-TS monorepo.
+
+# Root directory
+".":
+  "README.md": "Main project README with overview, setup instructions, and roadmap."
+  "package.json": "Root package.json, defines workspaces and dev dependencies for the monorepo."
+  "pnpm-workspace.yaml": "Defines the pnpm workspace configuration."
+  "tsconfig.json": "Root TypeScript configuration."
+  ".github/": "Contains GitHub-specific files like workflows and issue templates."
+  "docs/":
+    "README.md": "README for the documentation directory."
+    "open-telemetry-dashboards/": "Contains OpenTelemetry dashboard templates."
+  "packages/":
+    "instrumentation-mcp/":
+      "README.md": "Package-specific README for the MCP instrumentation module."
+      "package.json": "Defines dependencies, scripts, and metadata for the instrumentation package."
+      "tsconfig.json": "TypeScript configuration for the instrumentation package."
+      "src/":
+        "index.ts": "Main entry point of the package. Exports the `instrumentServer` function."
+        "types.ts": "Contains TypeScript type definitions for configuration and public interfaces."
+        "config.ts": "Handles validation and default values for the telemetry configuration."
+        "telemetry.ts": "Core module for setting up and managing OpenTelemetry tracing and metrics."
+        "instrumentation.ts": "Module responsible for wrapping McpServer methods to capture telemetry."
+        "sanitizer.ts": "Contains logic for sanitizing personally identifiable information (PII)."
+        "utils.ts": "Utility functions used across the package."
+      "test/": "Contains unit and integration tests for the instrumentation package."
+      "examples/": "Contains example usage of the instrumentation package."
