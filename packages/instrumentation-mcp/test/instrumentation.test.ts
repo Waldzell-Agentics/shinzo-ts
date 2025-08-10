@@ -1,51 +1,37 @@
 import { McpServerInstrumentation } from '../src/instrumentation'
 import { TelemetryManager } from '../src/telemetry'
 import { MockMcpServer, createTestTools, createTestResources, createTestPrompts } from './mocks/MockMcpServer'
-import { McpServer } from '@modelcontextprotocol/sdk/server/mcp'
-import { TelemetryConfig } from '../src/types'
+import { SpanStatusCode } from '@opentelemetry/api'
 
 // Mock the telemetry manager
 jest.mock('../src/telemetry', () => ({
-  TelemetryManager: jest.fn()
-}))
+  TelemetryManager: jest.fn().mockImplementation(() => ({
+    startActiveSpan: jest.fn().mockImplementation((name, options, fn) => fn(mockSpan)),
+    getHistogram: jest.fn().mockReturnValue(jest.fn()),
+    getIncrementCounter: jest.fn().mockReturnValue(jest.fn()),
+    getArgumentAttributes: jest.fn().mockReturnValue({}),
+  })),
+}));
+
+let mockSpan: any;
 
 describe('McpServerInstrumentation', () => {
   let mockServer: MockMcpServer
-  let mockTelemetryManager: jest.Mocked<TelemetryManager>
   let instrumentation: McpServerInstrumentation
-  let mockSpan: any
-  let mockConfig: TelemetryConfig
 
   beforeEach(() => {
     mockServer = new MockMcpServer()
-
-    // Create mock config
-    mockConfig = {
-      serverName: 'test-server',
-      serverVersion: '1.0.0',
-      exporterEndpoint: 'http://localhost:4318/v1',
-      enableArgumentCollection: false // default to false
-    }
-
-    // Create mock span
-    mockSpan = {
-      setAttributes: jest.fn(),
-      setStatus: jest.fn(),
-      end: jest.fn()
-    }
-
-    // Create mock telemetry manager
-    mockTelemetryManager = {
-      startActiveSpan: jest.fn().mockImplementation((name, options, fn) => fn(mockSpan)),
-      createSpan: jest.fn().mockReturnValue(mockSpan),
-      getHistogram: jest.fn().mockReturnValue(jest.fn()),
-      getIncrementCounter: jest.fn().mockReturnValue(jest.fn()),
-      processTelemetryAttributes: jest.fn().mockImplementation((data) => data),
-      getArgumentAttributes: jest.fn().mockReturnValue({}),
-      shutdown: jest.fn(),
-    } as any
-
+    const mockTelemetryManager = new TelemetryManager({
+        serverName: 'test-server',
+        serverVersion: '1.0.0',
+    });
     instrumentation = new McpServerInstrumentation(mockServer as any, mockTelemetryManager)
+
+    mockSpan = {
+      setStatus: jest.fn(),
+      setAttribute: jest.fn(),
+      end: jest.fn(),
+    }
   })
 
   afterEach(() => {
@@ -54,222 +40,98 @@ describe('McpServerInstrumentation', () => {
   })
 
   describe('instrument', () => {
-    it('should instrument server methods', () => {
-      const originalTool = mockServer.tool
-      const originalResource = mockServer.resource
-      const originalPrompt = mockServer.prompt
-
+    it('should wrap registerTool method', () => {
+      const originalRegisterTool = mockServer.registerTool
       instrumentation.instrument()
-
-      // Methods should still exist but potentially be wrapped
-      expect(typeof mockServer.tool).toBe('function')
-      expect(typeof mockServer.resource).toBe('function')
-      expect(typeof mockServer.prompt).toBe('function')
+      expect(mockServer.registerTool).not.toBe(originalRegisterTool)
     })
 
-    it('should handle tool calls', async () => {
-      createTestTools(mockServer)
+    it('should wrap registerPrompt method', () => {
+      const originalRegisterPrompt = mockServer.registerPrompt
       instrumentation.instrument()
-
-      const result = await mockServer.callTool('calculator', {
-        operation: 'add',
-        a: 2,
-        b: 3
-      })
-
-      expect(result).toEqual({ result: 5 })
+      expect(mockServer.registerPrompt).not.toBe(originalRegisterPrompt)
     })
 
-    it('should handle resource calls', async () => {
-      createTestResources(mockServer)
+    it('should wrap registerResource method', () => {
+      const originalRegisterResource = mockServer.registerResource
       instrumentation.instrument()
-
-      const result = await mockServer.callResource('file://test.txt')
-
-      expect(result).toEqual({
-        uri: 'file://test.txt',
-        content: 'This is test content',
-        mimeType: 'text/plain'
-      })
-    })
-
-    it('should handle prompt calls', async () => {
-      createTestPrompts(mockServer)
-      instrumentation.instrument()
-
-      const result = await mockServer.callPrompt('greeting', { name: 'World' })
-
-      expect(result).toEqual({
-        messages: [
-          {
-            role: 'user',
-            content: 'Hello World! How are you today?'
-          }
-        ]
-      })
-    })
-
-    it('should handle tool errors', async () => {
-      createTestTools(mockServer)
-      instrumentation.instrument()
-
-      await expect(mockServer.callTool('failing-tool')).rejects.toThrow('Tool failed')
-    })
-
-    it('should handle resource errors', async () => {
-      createTestResources(mockServer)
-      instrumentation.instrument()
-
-      await expect(mockServer.callResource('file://error.txt')).rejects.toThrow('Resource not found')
-    })
-
-    it('should handle prompt errors', async () => {
-      createTestPrompts(mockServer)
-      instrumentation.instrument()
-
-      await expect(mockServer.callPrompt('failing-prompt')).rejects.toThrow('Prompt failed')
+      expect(mockServer.registerResource).not.toBe(originalRegisterResource)
     })
 
     it('should not double-instrument', () => {
-      const originalTool = mockServer.tool
       instrumentation.instrument()
-      const instrumentedTool = mockServer.tool
-      instrumentation.instrument() // Second call should be ignored
-
-      expect(mockServer.tool).toBe(instrumentedTool)
-    })
-
-    it('should handle slow operations', async () => {
-      // Use real timers for this test
-      jest.useRealTimers()
-  
-      createTestTools(mockServer)
+      const instrumentedRegisterTool = mockServer.registerTool
       instrumentation.instrument()
-
-      // Test functionality rather than actual timing to avoid flaky tests
-      const result = await mockServer.callTool('slow-operation', { delay: 5 })
-  
-      expect(result).toEqual({ completed: true, delay: 5 })
-  
-      // Restore fake timers
-      jest.useFakeTimers()
-    })
-
-    it('should extract parameters correctly', async () => {
-      createTestTools(mockServer)
-      instrumentation.instrument()
-
-      const result = await mockServer.callTool('calculator', {
-        operation: 'multiply',
-        a: 4,
-        b: 5
-      })
-
-      expect(result).toEqual({ result: 20 })
-    })
-
-    it('should execute tools correctly', async () => {
-      createTestTools(mockServer)
-      instrumentation.instrument()
-
-      const result = await mockServer.callTool('echo', { message: 'test' })
-
-      // Verify the tool executed correctly
-      expect(result).toEqual({ echo: 'test' })
+      expect(mockServer.registerTool).toBe(instrumentedRegisterTool)
     })
   })
 
-  describe('shutdown', () => {
-    it('should not throw when shutting down', () => {
+  describe('instrumented handlers', () => {
+    beforeEach(() => {
       instrumentation.instrument()
-      expect(() => mockTelemetryManager.shutdown()).not.toThrow()
     })
-  })
 
-  describe('private methods', () => {
-    it('should generate unique request IDs', async () => {
+    it('should instrument tool calls', async () => {
       createTestTools(mockServer)
-      instrumentation.instrument()
-
-      // Execute multiple calls and verify they work
-      const results = await Promise.all([
-        mockServer.callTool('echo', { message: 'test1' }),
-        mockServer.callTool('echo', { message: 'test2' }),
-        mockServer.callTool('echo', { message: 'test3' })
-      ])
-
-      expect(results).toHaveLength(3)
-      expect(results[0]).toEqual({ echo: 'test1' })
-      expect(results[1]).toEqual({ echo: 'test2' })
-      expect(results[2]).toEqual({ echo: 'test3' })
-    })
-
-    it('should extract parameter attributes correctly via telemetryManager', () => {
-      // Test that the telemetryManager.getArgumentAttributes method works correctly
-      const params = {
-        operation: 'add',
-        a: 5,
-        b: 10,
-        nested: {
-          property: 'value',
-          number: 42
-        }
+      const handler = mockServer.getToolHandler('calculator')
+      expect(handler).toBeDefined()
+      if (handler) {
+        const result = await handler({ operation: 'add', a: 2, b: 3 })
+        expect(result).toEqual({ result: 5 })
+        expect(mockSpan.setStatus).toHaveBeenCalledWith({ code: SpanStatusCode.OK })
       }
-
-      // Mock the getArgumentAttributes method to return the expected result
-      mockTelemetryManager.getArgumentAttributes = jest.fn().mockReturnValue({
-        'mcp.request.argument.operation': 'add',
-        'mcp.request.argument.a': 5,
-        'mcp.request.argument.b': 10,
-        'mcp.request.argument.nested.property': 'value',
-        'mcp.request.argument.nested.number': 42
-      })
-
-      const attributes = mockTelemetryManager.getArgumentAttributes(params)
-
-      expect(attributes).toEqual({
-        'mcp.request.argument.operation': 'add',
-        'mcp.request.argument.a': 5,
-        'mcp.request.argument.b': 10,
-        'mcp.request.argument.nested.property': 'value',
-        'mcp.request.argument.nested.number': 42
-      })
     })
 
-  })
-
-  describe('enableArgumentCollection', () => {
-    it('should respect enableArgumentCollection configuration through telemetryManager', () => {
-      // Since the config is now handled in telemetryManager, we test through that
-      const instrumentation = new McpServerInstrumentation(mockServer as any, mockTelemetryManager)
-      
-      // Verify the instrumentation was created successfully
-      expect(instrumentation).toBeDefined()
+    it('should instrument failing tool calls', async () => {
+      createTestTools(mockServer)
+      const handler = mockServer.getToolHandler('failing-tool')
+      expect(handler).toBeDefined()
+      if (handler) {
+        await expect(handler()).rejects.toThrow('Tool failed')
+        expect(mockSpan.setStatus).toHaveBeenCalledWith({ code: SpanStatusCode.ERROR, message: 'Tool failed' })
+      }
     })
 
-    it('should conditionally include arguments based on enableArgumentCollection via telemetryManager', () => {
-      // Test that the telemetryManager.getArgumentAttributes method handles the logic correctly
-      const params = { operation: 'add', a: 5, b: 10 }
-      
-      // Mock the getArgumentAttributes function to return empty object when disabled
-      mockTelemetryManager.getArgumentAttributes = jest.fn().mockReturnValue({})
-      
-      const resultDisabled = mockTelemetryManager.getArgumentAttributes(params)
-      expect(resultDisabled).toEqual({})
-      
-      // Mock the getArgumentAttributes function to return attributes when enabled
-      mockTelemetryManager.getArgumentAttributes = jest.fn().mockReturnValue({
-        'mcp.request.argument.operation': 'add',
-        'mcp.request.argument.a': 5,
-        'mcp.request.argument.b': 10
-      })
-      
-      const resultEnabled = mockTelemetryManager.getArgumentAttributes(params)
-      expect(resultEnabled).toEqual({
-        'mcp.request.argument.operation': 'add',
-        'mcp.request.argument.a': 5,
-        'mcp.request.argument.b': 10
-      })
+    it('should instrument resource calls', async () => {
+      createTestResources(mockServer)
+      const handler = mockServer.getResourceHandler('file-reader')
+      expect(handler).toBeDefined()
+      if (handler) {
+        const result = await handler({ path: 'test.txt' })
+        expect(result.content).toBe('This is test content')
+        expect(mockSpan.setStatus).toHaveBeenCalledWith({ code: SpanStatusCode.OK })
+      }
+    })
+
+    it('should instrument failing resource calls', async () => {
+      createTestResources(mockServer)
+      const handler = mockServer.getResourceHandler('file-reader')
+      expect(handler).toBeDefined()
+      if (handler) {
+        await expect(handler({ path: 'error.txt' })).rejects.toThrow('Resource not found')
+        expect(mockSpan.setStatus).toHaveBeenCalledWith({ code: SpanStatusCode.ERROR, message: 'Resource not found' })
+      }
+    })
+
+    it('should instrument prompt calls', async () => {
+      createTestPrompts(mockServer)
+      const handler = mockServer.getPromptHandler('greeting')
+      expect(handler).toBeDefined()
+      if (handler) {
+        const result = await handler({ name: 'World' })
+        expect(result.messages[0].content).toContain('Hello World!')
+        expect(mockSpan.setStatus).toHaveBeenCalledWith({ code: SpanStatusCode.OK })
+      }
+    })
+
+    it('should instrument failing prompt calls', async () => {
+      createTestPrompts(mockServer)
+      const handler = mockServer.getPromptHandler('failing-prompt')
+      expect(handler).toBeDefined()
+      if (handler) {
+        await expect(handler()).rejects.toThrow('Prompt failed')
+        expect(mockSpan.setStatus).toHaveBeenCalledWith({ code: SpanStatusCode.ERROR, message: 'Prompt failed' })
+      }
     })
   })
 })
