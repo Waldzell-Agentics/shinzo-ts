@@ -1,7 +1,7 @@
 import { TelemetryManager } from './telemetry'
 import { Span, SpanStatusCode } from '@opentelemetry/api'
 import { generateUuid, getRuntimeInfo } from './utils'
-import { McpServer, RegisteredTool } from '@modelcontextprotocol/sdk/server/mcp'
+import { McpServer } from '@modelcontextprotocol/sdk/server/mcp'
 
 export class McpServerInstrumentation {
   private telemetryManager: TelemetryManager
@@ -17,71 +17,67 @@ export class McpServerInstrumentation {
     if (this.isInstrumented) return
 
     this.instrumentTools()
-    this.instrumentCompletions()
-    this.instrumentLogs()
-    this.instrumentNotifications()
-    this.instrumentPings()
+    // this.instrumentCompletions()
+    // this.instrumentLogs()
+    // this.instrumentNotifications()
+    // this.instrumentPings()
     this.instrumentPrompts()
     this.instrumentResources()
-    this.instrumentRoots()
-    this.instrumentSampling()
+    // this.instrumentRoots()
+    // this.instrumentSampling()
     this.isInstrumented = true
   }
 
   private instrumentTools(): void {
-    if (!this.server.tool || typeof this.server.tool !== 'function') {
+    if (typeof this.server.registerTool !== 'function') {
       return
     }
   
-    const originalTool = this.server.tool.bind(this.server)
+    const originalRegisterTool = this.server.registerTool.bind(this.server)
 
-    this.server.tool = (name: string, ...rest: any[]): RegisteredTool => {
-      const cb = rest[rest.length - 1] as (...args: any[]) => any
-      if (typeof cb === 'function') {
-        rest[rest.length - 1] = this.createInstrumentedHandler(cb, 'tools/call', name)
-      }
-      return (originalTool as any)(name, ...rest)
+    this.server.registerTool = (name: string, config: any, handler: (...args: any[]) => any): any => {
+      const wrappedHandler = this.createInstrumentedHandler(handler, 'tools/call', name)
+      return originalRegisterTool(name, config, wrappedHandler)
     }
   }
 
-  private instrumentCompletions(): void {
-    // TODO add instrumentation for the completion method
-  }
-
-  private instrumentLogs(): void {
-    // TODO add instrumentation for the logging method
-  }
-
-  private instrumentNotifications(): void {
-    // TODO add instrumentation for the notification method
-  }
-
-  private instrumentPings(): void {
-    // TODO add instrumentation for the ping method
-  }
-
   private instrumentPrompts(): void {
-    // TODO add instrumentation for the prompt method
+    if (typeof this.server.registerPrompt !== 'function') {
+      return
+    }
+
+    const originalRegisterPrompt = this.server.registerPrompt.bind(this.server)
+
+    this.server.registerPrompt = (name: string, config: any, handler: (...args: any[]) => any): any => {
+      const wrappedHandler = this.createInstrumentedHandler(handler, 'prompts/call', name)
+      return originalRegisterPrompt(name, config, wrappedHandler)
+    }
   }
 
   private instrumentResources(): void {
-    // TODO add instrumentation for the resource method
+    if (typeof this.server.registerResource !== 'function') {
+      return
+    }
+
+    const originalRegisterResource = this.server.registerResource.bind(this.server)
+
+    this.server.registerResource = (name: string, template: any, config: any, handler: (...args: any[]) => any): any => {
+      const wrappedHandler = this.createInstrumentedHandler(handler, 'resources/call', name)
+      return originalRegisterResource(name, template, config, wrappedHandler)
+    }
   }
 
-  private instrumentRoots(): void {
-    // TODO add instrumentation for the root method
-  }
-
-  private instrumentSampling(): void {
-    // TODO add instrumentation for the sampling method
-  }
+  // TODO: Add instrumentation for other registerable methods if they exist
+  // e.g. registerCompletion, registerLog, etc.
 
   private createInstrumentedHandler(originalHandler: (...args: any[]) => any, method: string, name: string): (...args: any[]) => any {
     const { address, port } = getRuntimeInfo()
 
+    const [methodType, _] = method.split('/')
+
     const baseAttributes = {
       'mcp.method.name': method,
-      'mcp.tool.name': name
+      [`mcp.${methodType}.name`]: name
     }
 
     const recordHistogram = this.telemetryManager.getHistogram('mcp.server.operation.duration', {
@@ -114,7 +110,8 @@ export class McpServerInstrumentation {
         try {
           result = await originalHandler.apply(this.server, [params])
           span.setStatus({ code: SpanStatusCode.OK })
-        } catch (error) {
+        } catch (e) {
+          error = e;
           span.setStatus({ code: SpanStatusCode.ERROR, message: (error as Error).message })
           span.setAttribute('error.type', (error as Error).name)
         }
